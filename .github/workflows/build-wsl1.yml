@@ -16,17 +16,15 @@ jobs:
       with:
         submodules: recursive
     - uses: microsoft/setup-msbuild@v2
-    - name: Show installed Windows kits
-      shell: pwsh
-      run: Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include" | Select-Object Name
     - name: Put WDK tools (stampinf, inf2cat, signtool) on PATH
       shell: pwsh
       run: |
-        $bin = Get-ChildItem "C:\Program Files (x86)\Windows Kitsin" -Directory |
-          Where-Object { Test-Path (Join-Path $_.FullName 'x86\stampinf.exe') } |
+        $kits = 'C:/Program Files (x86)/Windows Kits/10/bin'
+        $bin = Get-ChildItem $kits -Directory |
+          Where-Object { Test-Path (Join-Path $_.FullName 'x86/stampinf.exe') } |
           Sort-Object Name | Select-Object -Last 1
-        "$($bin.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-        "$($bin.FullName)d" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        Join-Path $bin.FullName 'x86' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        Join-Path $bin.FullName 'x64' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
         "using $($bin.FullName)"
     - name: Build driver and DLL
       shell: cmd
@@ -39,4 +37,5 @@ jobs:
           build/VStudio/build/Release/winfsp-x64.dll
           build/VStudio/build/Release/winfsp-x64.pdb
           build/VStudio/build/Release/*.cer
+          build/VStudio/build/Release/driver-x64.*
         if-no-files-found: warn
