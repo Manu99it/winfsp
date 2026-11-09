@@ -19,6 +19,15 @@ jobs:
     - name: Show installed Windows kits
       shell: pwsh
       run: Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include" | Select-Object Name
+    - name: Put WDK tools (stampinf, inf2cat, signtool) on PATH
+      shell: pwsh
+      run: |
+        $bin = Get-ChildItem "C:\Program Files (x86)\Windows Kitsin" -Directory |
+          Where-Object { Test-Path (Join-Path $_.FullName 'x86\stampinf.exe') } |
+          Sort-Object Name | Select-Object -Last 1
+        "$($bin.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        "$($bin.FullName)d" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        "using $($bin.FullName)"
     - name: Build driver and DLL
       shell: cmd
       run: msbuild build\VStudio\winfsp.sln /m /t:winfsp_sys;winfsp_dll /p:Configuration=Release /p:Platform=x64
