@@ -49,8 +49,10 @@ jobs:
       run: |
         $tag = "wsl1-volfs-${{ github.run_number }}"
         $out = 'build/VStudio/build/Release'
-        $files = @("$out/winfsp-x64.sys", "$out/winfsp-x64.dll", "$out/winfsp-x64.pdb") +
-          (Get-ChildItem "$out/*.cer", "$out/driver-x64.*" | ForEach-Object FullName)
+        $files = Get-ChildItem $out -File |
+          Where-Object { $_.Name -match '^winfsp-x64\.(sys|dll)$|\.(cer|pdb)$|^driver-x64\.' } |
+          ForEach-Object FullName
+        $files
         gh release create $tag --repo ${{ github.repository }} --target ${{ github.sha }} --prerelease `
           --title "WSL 1 test build ${{ github.run_number }}" `
           --notes "Test-signed x64 build of the wsl1-volfs branch. Loads only with test signing enabled." @files
