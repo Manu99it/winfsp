@@ -28,7 +28,7 @@ jobs:
         "using $($bin.FullName)"
     - name: Build driver and DLL
       shell: cmd
-      run: msbuild build\VStudio\winfsp.sln /m /t:winfsp_sys;winfsp_dll /p:Configuration=Release /p:Platform=x64
+      run: msbuild build\VStudio\winfsp.sln /m /t:winfsp_sys;winfsp_dll /p:Configuration=Release /p:Platform=x64 /p:MyTargetPlatformVersion=10.0.26100.0 /p:MyNtddiVersion=0x0A000006 /p:MyWin32Version=0x0A00
     - uses: actions/upload-artifact@v4
       with:
         name: winfsp-wsl1-x64
