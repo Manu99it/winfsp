@@ -910,6 +910,50 @@ exit:
     return Result;
 }
 
+#define FSP_FILE_CASE_SENSITIVE_INFORMATION_CLASS 71
+#define FSP_FILE_CS_FLAG_CASE_SENSITIVE_DIR 0x00000001
+
+/*
+ * FileCaseSensitiveInformation. WinFsp volumes are either case-sensitive or not as a
+ * whole, so on a case-sensitive volume every directory is case-sensitive: report the flag
+ * and accept requests that set it. WSL 1 sets it on every directory it creates.
+ */
+static NTSTATUS FspFsvolQueryCaseSensitiveInformation(
+    PDEVICE_OBJECT FsvolDeviceObject, PIRP Irp, PIO_STACK_LOCATION IrpSp)
+{
+    PAGED_CODE();
+
+    FSP_FILE_NODE *FileNode = IrpSp->FileObject->FsContext;
+    if (sizeof(ULONG) > IrpSp->Parameters.QueryFile.Length)
+        return STATUS_INFO_LENGTH_MISMATCH;
+    *(PULONG)Irp->AssociatedIrp.SystemBuffer =
+        FileNode->IsDirectory && FspFsvolDeviceExtension(FsvolDeviceObject)->VolumeParams.CaseSensitiveSearch ?
+            FSP_FILE_CS_FLAG_CASE_SENSITIVE_DIR : 0;
+    Irp->IoStatus.Information = sizeof(ULONG);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS FspFsvolSetCaseSensitiveInformation(
+    PDEVICE_OBJECT FsvolDeviceObject, PIRP Irp, PIO_STACK_LOCATION IrpSp)
+{
+    PAGED_CODE();
+
+    FSP_FILE_NODE *FileNode = IrpSp->FileObject->FsContext;
+    ULONG Flags;
+    if (sizeof(ULONG) > IrpSp->Parameters.SetFile.Length)
+        return STATUS_INFO_LENGTH_MISMATCH;
+    if (!FspFsvolDeviceExtension(FsvolDeviceObject)->VolumeParams.CaseSensitiveSearch)
+        return STATUS_INVALID_PARAMETER;
+    if (!FileNode->IsDirectory)
+        return STATUS_INVALID_PARAMETER;
+    Flags = *(PULONG)Irp->AssociatedIrp.SystemBuffer;
+    if (0 != (Flags & ~FSP_FILE_CS_FLAG_CASE_SENSITIVE_DIR))
+        return STATUS_INVALID_PARAMETER;
+    if (0 == (Flags & FSP_FILE_CS_FLAG_CASE_SENSITIVE_DIR))
+        return STATUS_NOT_SUPPORTED;    /* cannot make a directory case-insensitive */
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS FspFsvolQueryInformation(
     PDEVICE_OBJECT FsvolDeviceObject, PIRP Irp, PIO_STACK_LOCATION IrpSp)
 {
@@ -924,6 +968,10 @@ static NTSTATUS FspFsvolQueryInformation(
     /* special case FileStreamInformation */
     if (FileStreamInformation == FileInformationClass)
         return FspFsvolQueryStreamInformation(FsvolDeviceObject, Irp, IrpSp);
+
+    /* special case FileCaseSensitiveInformation */
+    if (FSP_FILE_CASE_SENSITIVE_INFORMATION_CLASS == FileInformationClass)
+        return FspFsvolQueryCaseSensitiveInformation(FsvolDeviceObject, Irp, IrpSp);
 
     NTSTATUS Result;
     PFILE_OBJECT FileObject = IrpSp->FileObject;
@@ -1999,6 +2047,8 @@ static NTSTATUS FspFsvolSetInformation(
     case FileRenameInformation:
     case FileRenameInformationEx:
         return FspFsvolSetRenameInformation(FsvolDeviceObject, Irp, IrpSp);
+    case FSP_FILE_CASE_SENSITIVE_INFORMATION_CLASS:
+        return FspFsvolSetCaseSensitiveInformation(FsvolDeviceObject, Irp, IrpSp);
     }
 
     NTSTATUS Result;

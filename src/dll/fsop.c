@@ -418,6 +418,32 @@ VOID FspFileSystemOpCreate_SetOpenDescriptor(FSP_FSCTL_TRANSACT_RSP *Response,
     }
 }
 
+/*
+ * The kernel sends a reparse point together with an EA buffer when a create carries both
+ * (WSL creating symlinks and special files). Apply it before the create is answered, so
+ * the operation stays atomic for the caller.
+ */
+static NTSTATUS FspFileSystemOpCreate_SetReparsePoint(FSP_FILE_SYSTEM *FileSystem,
+    FSP_FSCTL_TRANSACT_REQ *Request, PVOID FileContext, FSP_FSCTL_FILE_INFO *FileInfo)
+{
+    NTSTATUS Result;
+
+    if (0 == Request->Req.Create.ReparsePoint.Size)
+        return STATUS_SUCCESS;
+    if (0 == FileSystem->Interface->SetReparsePoint)
+        return STATUS_INVALID_DEVICE_REQUEST;
+
+    Result = FileSystem->Interface->SetReparsePoint(FileSystem, FileContext,
+        (PWSTR)Request->Buffer,
+        (PVOID)(Request->Buffer + Request->Req.Create.ReparsePoint.Offset),
+        Request->Req.Create.ReparsePoint.Size);
+    if (NT_SUCCESS(Result) && 0 != FileSystem->Interface->GetFileInfo)
+        Result = FileSystem->Interface->GetFileInfo(FileSystem, FileContext, FileInfo);
+    if (!NT_SUCCESS(Result) && 0 != FileSystem->Interface->Close)
+        FileSystem->Interface->Close(FileSystem, FileContext);
+    return Result;
+}
+
 static NTSTATUS FspFileSystemOpCreate_FileCreate(FSP_FILE_SYSTEM *FileSystem,
     FSP_FSCTL_TRANSACT_REQ *Request, FSP_FSCTL_TRANSACT_RSP *Response)
 {
@@ -451,7 +477,10 @@ static NTSTATUS FspFileSystemOpCreate_FileCreate(FSP_FILE_SYSTEM *FileSystem,
                 (PVOID)(Request->Buffer + Request->Req.Create.Ea.Offset) : 0,
             Request->Req.Create.Ea.Size,
             Request->Req.Create.EaIsReparsePoint,
-            AddrOfFileContext(FullContext), &OpenFileInfo.FileInfo);
+            AddrOfFileContext(FullContext), &OpenFileInfo.FileInfo),
+        Result = NT_SUCCESS(Result) ?
+            FspFileSystemOpCreate_SetReparsePoint(FileSystem, Request,
+                ValOfFileContext(FullContext), &OpenFileInfo.FileInfo) : Result;
     else
         Result = FileSystem->Interface->Create(FileSystem,
             (PWSTR)Request->Buffer, Request->Req.Create.CreateOptions, GrantedAccess,
@@ -599,7 +628,10 @@ static NTSTATUS FspFileSystemOpCreate_FileOpenIf(FSP_FILE_SYSTEM *FileSystem,
                     (PVOID)(Request->Buffer + Request->Req.Create.Ea.Offset) : 0,
                 Request->Req.Create.Ea.Size,
                 Request->Req.Create.EaIsReparsePoint,
-                AddrOfFileContext(FullContext), &OpenFileInfo.FileInfo);
+                AddrOfFileContext(FullContext), &OpenFileInfo.FileInfo),
+            Result = NT_SUCCESS(Result) ?
+                FspFileSystemOpCreate_SetReparsePoint(FileSystem, Request,
+                    ValOfFileContext(FullContext), &OpenFileInfo.FileInfo) : Result;
         else
             Result = FileSystem->Interface->Create(FileSystem,
                 (PWSTR)Request->Buffer, Request->Req.Create.CreateOptions, GrantedAccess,
@@ -734,7 +766,10 @@ static NTSTATUS FspFileSystemOpCreate_FileOverwriteIf(FSP_FILE_SYSTEM *FileSyste
                     (PVOID)(Request->Buffer + Request->Req.Create.Ea.Offset) : 0,
                 Request->Req.Create.Ea.Size,
                 Request->Req.Create.EaIsReparsePoint,
-                AddrOfFileContext(FullContext), &OpenFileInfo.FileInfo);
+                AddrOfFileContext(FullContext), &OpenFileInfo.FileInfo),
+            Result = NT_SUCCESS(Result) ?
+                FspFileSystemOpCreate_SetReparsePoint(FileSystem, Request,
+                    ValOfFileContext(FullContext), &OpenFileInfo.FileInfo) : Result;
         else
             Result = FileSystem->Interface->Create(FileSystem,
                 (PWSTR)Request->Buffer, Request->Req.Create.CreateOptions, GrantedAccess,

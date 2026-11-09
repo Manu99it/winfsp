@@ -1,0 +1,33 @@
+name: build-wsl1
+
+# Builds the driver and the DLL of the wsl1-volfs branch (test-signed, x64 Release)
+# and uploads them as an artifact. Not a release build: no installer, no Microsoft signature.
+
+on:
+  push:
+    branches: [wsl1-volfs]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - uses: microsoft/setup-msbuild@v2
+    - name: Show installed Windows kits
+      shell: pwsh
+      run: Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include" | Select-Object Name
+    - name: Build driver and DLL
+      shell: cmd
+      run: msbuild build\VStudio\winfsp.sln /m /t:winfsp_sys;winfsp_dll /p:Configuration=Release /p:Platform=x64
+    - uses: actions/upload-artifact@v4
+      with:
+        name: winfsp-wsl1-x64
+        path: |
+          build/VStudio/build/Release/winfsp-x64.sys
+          build/VStudio/build/Release/winfsp-x64.dll
+          build/VStudio/build/Release/winfsp-x64.pdb
+          build/VStudio/build/Release/*.cer
+        if-no-files-found: warn

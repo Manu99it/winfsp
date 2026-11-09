@@ -370,6 +370,7 @@ typedef struct
             UINT32 EaIsReparsePoint:1;      /* Ea buffer is reparse point */
             UINT32 ReservedFlags:24;
             UINT16 NamedStream;             /* request targets named stream; colon offset in FileName */
+            FSP_FSCTL_TRANSACT_BUF ReparsePoint;    /* reparse point to set after an EA create */
         } Create;
         struct
         {

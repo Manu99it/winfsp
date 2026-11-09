@@ -324,6 +324,8 @@ static NTSTATUS FspFsvolCreateNoLock(
         BooleanFlagOn(AccessState->Flags, TOKEN_HAS_RESTORE_PRIVILEGE);
     BOOLEAN HasTrailingBackslash = FALSE;
     BOOLEAN EaIsReparsePoint = FALSE;
+    PVOID ReparseBuffer = 0;
+    ULONG ReparseLength = 0;
     FSP_FILE_NODE *FileNode, *RelatedFileNode;
     FSP_FILE_DESC *FileDesc;
     UNICODE_STRING MainFileName = { 0 }, StreamPart = { 0 };
@@ -337,8 +339,12 @@ static NTSTATUS FspFsvolCreateNoLock(
     /* is there an AtomicCreateEcp attached? */
     if (0 != AtomicCreateEcp)
     {
+        /*
+         * WSL (DrvFs metadata, lxcore) creates symlinks and special files with an EA buffer
+         * (Linux mode/uid/gid) and an atomic reparse point at the same time. Accept both:
+         * the reparse point is passed to user mode in Req.Create.ReparsePoint.
+         */
         if ((FILE_CREATE != CreateDisposition && FILE_OPEN_IF != CreateDisposition) ||
-            0 != EaBuffer ||
             RTL_SIZEOF_THROUGH_FIELD(FSP_ATOMIC_CREATE_ECP_CONTEXT, ReparseBuffer) >
                 AtomicCreateEcp->Size ||
             /* !!!: revisit: FlagOn*/
@@ -358,9 +364,17 @@ static NTSTATUS FspFsvolCreateNoLock(
             /* mark that we satisfied the reparse point request, although we may fail it later! */
             AtomicCreateEcp->OutFlags = ATOMIC_CREATE_ECP_OUT_FLAG_REPARSE_POINT_SET;
 
-            ExtraBuffer = AtomicCreateEcp->ReparseBuffer;
-            ExtraLength = AtomicCreateEcp->ReparseBufferLength;
-            EaIsReparsePoint = TRUE;
+            if (0 == EaBuffer)
+            {
+                ExtraBuffer = AtomicCreateEcp->ReparseBuffer;
+                ExtraLength = AtomicCreateEcp->ReparseBufferLength;
+                EaIsReparsePoint = TRUE;
+            }
+            else
+            {
+                ReparseBuffer = AtomicCreateEcp->ReparseBuffer;
+                ReparseLength = AtomicCreateEcp->ReparseBufferLength;
+            }
         }
     }
 
@@ -626,6 +640,8 @@ static NTSTATUS FspFsvolCreateNoLock(
         /* cannot set extra buffer on named stream */
         ExtraBuffer = 0;
         ExtraLength = 0;
+        ReparseBuffer = 0;
+        ReparseLength = 0;
 
         /* remember the main file node */
         ASSERT(0 == FileNode->MainFileNode);
@@ -645,8 +661,10 @@ static NTSTATUS FspFsvolCreateNoLock(
 
     /* create the user-mode file system request */
     Result = FspIopCreateRequestEx(Irp, &FileNode->FileName,
-        0 != ExtraBuffer ?
-            FSP_FSCTL_DEFAULT_ALIGN_UP(SecurityDescriptorSize) + ExtraLength : SecurityDescriptorSize,
+        (0 != ExtraBuffer ?
+            FSP_FSCTL_DEFAULT_ALIGN_UP(SecurityDescriptorSize) + ExtraLength : SecurityDescriptorSize) +
+        (0 != ReparseBuffer ?
+            FSP_FSCTL_DEFAULT_ALIGNMENT + ReparseLength : 0),
         FspFsvolCreateRequestFini, &Request);
     if (!NT_SUCCESS(Result))
     {
@@ -699,6 +717,9 @@ static NTSTATUS FspFsvolCreateNoLock(
     Request->Req.Create.AcceptsSecurityDescriptor = 0 == Request->Req.Create.NamedStream &&
         !!FsvolDeviceExtension->VolumeParams.AllowOpenInKernelMode;
     Request->Req.Create.EaIsReparsePoint = EaIsReparsePoint;
+    Request->Req.Create.ReparsePoint.Offset = 0 != ReparseBuffer ?
+        NEXTOFS(Request->Req.Create.Ea) : 0;
+    Request->Req.Create.ReparsePoint.Size = 0 != ReparseBuffer ? (UINT16)ReparseLength : 0;
 #undef NEXTOFS
 
     ASSERT(
@@ -724,6 +745,11 @@ static NTSTATUS FspFsvolCreateNoLock(
     if (0 != ExtraBuffer)
         RtlCopyMemory(Request->Buffer + Request->Req.Create.Ea.Offset,
             ExtraBuffer, ExtraLength);
+
+    /* copy the reparse point that accompanies an EA buffer (if any) into the request */
+    if (0 != ReparseBuffer)
+        RtlCopyMemory(Request->Buffer + Request->Req.Create.ReparsePoint.Offset,
+            ReparseBuffer, ReparseLength);
 
     /* fix FileNode->FileName if we are doing SL_OPEN_TARGET_DIRECTORY */
     if (Request->Req.Create.OpenTargetDirectory)
