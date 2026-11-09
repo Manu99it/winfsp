@@ -8,6 +8,9 @@ on:
     branches: [wsl1-volfs]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-2022
@@ -39,3 +42,15 @@ jobs:
           build/VStudio/build/Release/*.cer
           build/VStudio/build/Release/driver-x64.*
         if-no-files-found: warn
+    - name: Publish as a prerelease (artifact downloads count against the account quota)
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $tag = "wsl1-volfs-${{ github.run_number }}"
+        $out = 'build/VStudio/build/Release'
+        $files = @("$out/winfsp-x64.sys", "$out/winfsp-x64.dll", "$out/winfsp-x64.pdb") +
+          (Get-ChildItem "$out/*.cer", "$out/driver-x64.*" | ForEach-Object FullName)
+        gh release create $tag --repo ${{ github.repository }} --target ${{ github.sha }} --prerelease `
+          --title "WSL 1 test build ${{ github.run_number }}" `
+          --notes "Test-signed x64 build of the wsl1-volfs branch. Loads only with test signing enabled." @files
